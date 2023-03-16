@@ -2,7 +2,6 @@ package qbittorrent_api
 
 import (
 	"github.com/sirupsen/logrus"
-	"github.com/xiangyt/qbittorrent-api/definition"
 	"net/http"
 	"net/url"
 )
@@ -18,8 +17,10 @@ func (a *Authorization) IsLoggedIn() bool {
 	return a.isLoggedIn
 }
 
-func (a *Authorization) Login() error {
-	resp, err := a.post(definition.Authorization, "login", map[string]string{
+func (a *Authorization) Login(username, password string) error {
+	a.username = username
+	a.password = password
+	resp, err := a.post(APINameAuthorization, "login", map[string]string{
 		"username": a.username,
 		"password": a.password,
 	})
@@ -27,8 +28,9 @@ func (a *Authorization) Login() error {
 		logrus.Error("Login failed")
 		return err
 	}
-	logrus.Debug("Login successful")
+	defer resp.Body.Close()
 
+	logrus.Debug("Login successful")
 	a.isLoggedIn = true
 
 	if cookies := resp.Cookies(); len(cookies) > 0 {
@@ -45,5 +47,9 @@ func (a *Authorization) Login() error {
 }
 
 func (a *Authorization) Logout() {
-
+	resp, err := a.post(APINameAuthorization, "logout", nil)
+	if err == nil {
+		resp.Body.Close()
+	}
+	a.Request.initialize()
 }

@@ -2,8 +2,11 @@ package qbittorrent_api
 
 import (
 	"encoding/json"
-	"github.com/xiangyt/qbittorrent-api/definition"
+	"github.com/pkg/errors"
 	"io"
+	"net/http"
+	"strconv"
+	"strings"
 )
 
 type TorrentsApi struct {
@@ -20,7 +23,7 @@ type Torrent struct {
 	CompletionOn      int           `json:"completion_on"`
 	ContentPath       string        `json:"content_path"`
 	DlLimit           int           `json:"dl_limit"`
-	Dlspeed           int           `json:"dlspeed"`
+	DlSpeed           int           `json:"dlspeed"`
 	DownloadPath      string        `json:"download_path"`
 	Downloaded        int64         `json:"downloaded"`
 	DownloadedSession int           `json:"downloaded_session"`
@@ -28,8 +31,8 @@ type Torrent struct {
 	FLPiecePrio       bool          `json:"f_l_piece_prio"`
 	ForceStart        bool          `json:"force_start"`
 	Hash              string        `json:"hash"`
-	InfohashV1        string        `json:"infohash_v1"`
-	InfohashV2        string        `json:"infohash_v2"`
+	InfoHashV1        string        `json:"infohash_v1"`
+	InfoHashV2        string        `json:"infohash_v2"`
 	LastActivity      int           `json:"last_activity"`
 	MagnetUri         string        `json:"magnet_uri"`
 	MaxRatio          int           `json:"max_ratio"`
@@ -59,45 +62,44 @@ type Torrent struct {
 	UpLimit           int           `json:"up_limit"`
 	Uploaded          int64         `json:"uploaded"`
 	UploadedSession   int           `json:"uploaded_session"`
-	Upspeed           int           `json:"upspeed"`
+	UpSpeed           int           `json:"upspeed"`
 }
 
-type TorrentInfoList []*Torrent
-type TorrentStates string
+type TorrentStates = string
 
 const (
-	ERROR                    TorrentStates = "error"
-	MISSING_FILES                          = "missingFiles"
-	UPLOADING                              = "uploading"
-	PAUSED_UPLOAD                          = "pausedUP"
-	QUEUED_UPLOAD                          = "queuedUP"
-	STALLED_UPLOAD                         = "stalledUP"
-	CHECKING_UPLOAD                        = "checkingUP"
-	FORCED_UPLOAD                          = "forcedUP"
-	ALLOCATING                             = "allocating"
-	DOWNLOADING                            = "downloading"
-	METADATA_DOWNLOAD                      = "metaDL"
-	FORCED_METADATA_DOWNLOAD               = "forcedMetaDL"
-	PAUSED_DOWNLOAD                        = "pausedDL"
-	QUEUED_DOWNLOAD                        = "queuedDL"
-	FORCED_DOWNLOAD                        = "forcedDL"
-	STALLED_DOWNLOAD                       = "stalledDL"
-	CHECKING_DOWNLOAD                      = "checkingDL"
-	CHECKING_RESUME_DATA                   = "checkingResumeData"
-	MOVING                                 = "moving"
-	UNKNOWN                                = "unknown"
+	Error                  TorrentStates = "error"
+	MissingFiles           TorrentStates = "missingFiles"
+	Uploading              TorrentStates = "uploading"
+	PausedUpload           TorrentStates = "pausedUP"
+	QueuedUpload           TorrentStates = "queuedUP"
+	StalledUpload          TorrentStates = "stalledUP"
+	CheckingUpload         TorrentStates = "checkingUP"
+	ForcedUpload           TorrentStates = "forcedUP"
+	Allocating             TorrentStates = "allocating"
+	Downloading            TorrentStates = "downloading"
+	MetadataDownload       TorrentStates = "metaDL"
+	ForcedMetadataDownload TorrentStates = "forcedMetaDL"
+	PausedDownload         TorrentStates = "pausedDL"
+	QueuedDownload         TorrentStates = "queuedDL"
+	ForcedDownload         TorrentStates = "forcedDL"
+	StalledDownload        TorrentStates = "stalledDL"
+	CheckingDownload       TorrentStates = "checkingDL"
+	CheckingResumeData     TorrentStates = "checkingResumeData"
+	Moving                 TorrentStates = "moving"
+	Unknown                TorrentStates = "unknown"
 )
 
 func (t Torrent) IsDownloading() bool {
 	switch t.State {
-	case DOWNLOADING,
-		METADATA_DOWNLOAD,
-		FORCED_METADATA_DOWNLOAD,
-		STALLED_DOWNLOAD,
-		CHECKING_DOWNLOAD,
-		PAUSED_DOWNLOAD,
-		QUEUED_DOWNLOAD,
-		FORCED_DOWNLOAD:
+	case Downloading,
+		MetadataDownload,
+		ForcedMetadataDownload,
+		StalledDownload,
+		CheckingDownload,
+		PausedDownload,
+		QueuedDownload,
+		ForcedDownload:
 		return true
 	}
 	return false
@@ -105,11 +107,11 @@ func (t Torrent) IsDownloading() bool {
 
 func (t Torrent) IsUploading() bool {
 	switch t.State {
-	case UPLOADING,
-		STALLED_UPLOAD,
-		CHECKING_UPLOAD,
-		QUEUED_UPLOAD,
-		FORCED_UPLOAD:
+	case Uploading,
+		StalledUpload,
+		CheckingUpload,
+		QueuedUpload,
+		ForcedUpload:
 		return true
 	}
 	return false
@@ -117,29 +119,90 @@ func (t Torrent) IsUploading() bool {
 
 func (t Torrent) IsComplete() bool {
 	switch t.State {
-	case UPLOADING,
-		STALLED_UPLOAD,
-		CHECKING_UPLOAD,
-		PAUSED_UPLOAD,
-		QUEUED_UPLOAD,
-		FORCED_UPLOAD:
+	case Uploading,
+		StalledUpload,
+		CheckingUpload,
+		PausedUpload,
+		QueuedUpload,
+		ForcedUpload:
 		return true
 	}
 	return false
 }
 
 func (t Torrent) IsChecking() bool {
-	return t.State == CHECKING_UPLOAD || t.State == CHECKING_DOWNLOAD || t.State == CHECKING_RESUME_DATA
+	return t.State == CheckingUpload || t.State == CheckingDownload || t.State == CheckingResumeData
 
 }
 
 func (t Torrent) IsErrored() bool {
-	return t.State == MISSING_FILES || t.State == ERROR
+	return t.State == MissingFiles || t.State == Error
 
 }
 
 func (t Torrent) IsPaused() bool {
-	return t.State == PAUSED_UPLOAD || t.State == PAUSED_DOWNLOAD
+	return t.State == PausedUpload || t.State == PausedDownload
+}
+
+// Filter
+// param status_filter: Filter list by all, downloading, completed, paused, active, inactive, resumed
+//
+//	stalled, stalled_uploading and stalled_downloading added in Web API 2.4.1
+//
+// param category: Filter list by category
+// param sort: Sort list by any property returned
+// param reverse: Reverse sorting
+// param limit: Limit length of list
+// param offset: Start of list (if < 0, offset from end of list)
+// param torrent_hashes: Filter list by hash (separate multiple hashes with a '|')
+// param tag: Filter list by tag (empty string means "untagged"; no "tag" param means "any tag"; added in Web API 2.8.3)
+type Filter struct {
+	StatusFilter TorrentStates `json:"filter"`
+	Category     string        `json:"category"`
+	Sort         FilterSort    `json:"sort"`
+	Reverse      bool          `json:"reverse"`
+	Limit        int           `json:"limit"`
+	Offset       int           `json:"offset"`
+	Hashes       []string      `json:"torrent_hashes"`
+	Tag          string        `json:"tag"`
+}
+
+type FilterSort = string
+
+const (
+	FilterSortName     = "name"
+	FilterSortPriority = "priority"
+)
+
+func (f *Filter) toMap() map[string]string {
+	var data = map[string]string{
+		"filter":   f.StatusFilter,
+		"category": f.Category,
+		"sort":     f.Sort,
+		"reverse":  "false",
+		//"limit": limit,
+		//"offset": offset,
+		"hashes": strings.Join(f.Hashes, "|"),
+		//"tag":    f.Tag,
+	}
+	if f.Reverse && f.Sort != "" {
+		data["reverse"] = "true"
+	}
+
+	if f.Sort == "" {
+		data["sort"] = FilterSortPriority
+	}
+	if f.Limit > 0 {
+		data["limit"] = strconv.Itoa(f.Limit)
+	}
+	if f.Offset != 0 {
+		data["offset"] = strconv.Itoa(f.Offset)
+	}
+	if f.Tag != "" {
+		data["tag"] = f.Tag
+	}
+
+	return data
 }
 
 // Torrents
@@ -159,19 +222,13 @@ func (t Torrent) IsPaused() bool {
 // @param tag: Filter list by tag (empty string means "untagged"; no "tag" param means "any tag"; added in Web API 2.8.3)
 // @return: :class:`TorrentInfoList` - `<https://github.com/qbittorrent/qBittorrent/wiki/WebUI-API-(qBittorrent-4.1)#get-torrent-list>`_
 // noqa: E501
-func (t *TorrentsApi) Torrents(data map[string]string) ([]*Torrent, error) {
-	resp, err := t.client.post(definition.Torrents, "info", data)
+func (t *TorrentsApi) Torrents(params *Filter) ([]*Torrent, error) {
+	_, body, err := t.postForTorrent("info", params.toMap())
 	if err != nil {
 		//logrus.Error(err)
 		return nil, err
 	}
 
-	defer resp.Body.Close()
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		//logrus.Error(err)
-		return nil, err
-	}
 	var torrents []*Torrent
 	if err = json.Unmarshal(body, &torrents); err != nil {
 		//logrus.Error(err)
@@ -180,21 +237,48 @@ func (t *TorrentsApi) Torrents(data map[string]string) ([]*Torrent, error) {
 	return torrents, nil
 }
 
-// addTorrents
-// """
-// Add one or more torrents by URLs and/or torrent files.
-//
-// :raises UnsupportedMediaType415Error: if file is not a valid torrent file
-// :raises TorrentFileNotFoundError: if a torrent file doesn't exist
-// :raises TorrentFilePermissionError: if read permission is denied to torrent file
-//
-// :return: “Ok.“ for success and “Fails.“ for failure
-// """  # noqa: E501
-func (t *TorrentsApi) addTorrents(data map[string]string) ([]*Torrent, error) {
-	return nil, nil
+type Category struct {
+	Name         string `json:"name"`
+	SavePath     string `json:"savePath"`
+	DownloadPath string `json:"download_path"`
 }
 
-// downloadBase
+// GetAllCategories Retrieve all category definitions.
+func (t *TorrentsApi) GetAllCategories() ([]*Category, error) {
+	_, body, err := t.getForTorrent(actionGetAllCategories, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var categories = map[string]*Category{}
+	if err = json.Unmarshal(body, &categories); err != nil {
+		//logrus.Error(err)
+		return nil, err
+	}
+
+	var res []*Category
+	for _, category := range categories {
+		res = append(res, category)
+	}
+	return res, nil
+}
+
+// GetAllTags Retrieve all category definitions.
+func (t *TorrentsApi) GetAllTags() ([]string, error) {
+	_, body, err := t.getForTorrent(actionGetAllTags, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var tags []string
+	if err = json.Unmarshal(body, &tags); err != nil {
+		//logrus.Error(err)
+		return nil, err
+	}
+	return tags, nil
+}
+
+// downloadBaseConfig
 // :param save_path: location to save the torrent data
 // :param cookie: cookie to retrieve torrents by URL
 // :param category: category to assign to torrent(s)
@@ -213,24 +297,58 @@ func (t *TorrentsApi) addTorrents(data map[string]string) ([]*Torrent, error) {
 // :param seeding_time_limit: number of minutes to seed torrent (added in Web API 2.8.1)
 // :param download_path: location to download torrent content before moving to save_path (added in Web API 2.8.4)
 // :param use_download_path: whether the download_path should be used...defaults to True if download_path is specified (added in Web API 2.8.4)
-type downloadBase struct {
-	SavePath           string        `json:"savepath"` // 保存文件到：
-	Category           string        `json:"category"` // 分类：
-	Tags               string        `json:"tags"`
+type downloadBaseConfig struct {
+	SavePath           string        `json:"savepath"`      // 保存文件到：
+	Category           string        `json:"category"`      // 分类：
+	Tags               []string      `json:"tags"`          // 标签
 	SkipChecking       bool          `json:"skip_checking"` // 跳过哈希校验
 	Paused             bool          `json:"paused"`        // 开始 Torrent
 	RootFolder         string        `json:"root_folder"`
 	ContentLayout      ContentLayout `json:"contentLayout"` // 内容布局：
 	Rename             string        `json:"rename"`        // 重命名 torrent
-	UpLimit            string        `json:"upLimit"`       // 限制上传速率
-	DlLimit            string        `json:"dlLimit"`       // 限制下载速率
+	UpLimit            int           `json:"upLimit"`       // 限制上传速率
+	DlLimit            int           `json:"dlLimit"`       // 限制下载速率
 	RatioLimit         string        `json:"ratioLimit"`
 	SeedingTimeLimit   string        `json:"seedingTimeLimit"`
-	AutoTMM            string        `json:"autoTMM"`
+	AutoTMM            bool          `json:"autoTMM"`            // 自动 Torrent 管理
 	SequentialDownload bool          `json:"sequentialDownload"` // 按顺序下载
 	FirstLastPiecePrio bool          `json:"firstLastPiecePrio"` // 先下载首尾文件块
 	DownloadPath       string        `json:"downloadPath"`
 	UseDownloadPath    bool          `json:"useDownloadPath"`
+}
+
+func (cfg downloadBaseConfig) toMap() map[string]string {
+	data := map[string]string{
+		"autoTMM":       "false",
+		"savepath":      cfg.SavePath,
+		"rename":        cfg.Rename,
+		"category":      cfg.Category,
+		"tags":          strings.Join(cfg.Tags, ","),
+		"paused":        "false",
+		"contentLayout": cfg.ContentLayout,
+		"dlLimit":       "NaN",
+		"upLimit":       "NaN",
+	}
+	if cfg.AutoTMM {
+		data["autoTMM"] = "true"
+	}
+	if cfg.Paused {
+		data["paused"] = "true"
+	}
+	if cfg.ContentLayout == "" {
+		data["contentLayout"] = ContentLayoutOriginal
+	}
+
+	if cfg.DlLimit > 0 {
+		data["dlLimit"] = strconv.Itoa(cfg.DlLimit)
+	}
+	if cfg.UpLimit > 0 {
+		data["upLimit"] = strconv.Itoa(cfg.UpLimit)
+	}
+	if cfg.SkipChecking {
+		data["skip_checking"] = "true"
+	}
+	return data
 }
 
 type ContentLayout = string
@@ -244,8 +362,46 @@ const (
 // MagnetDLConfig
 // :param urls: single instance or an iterable of URLs (http://, https://, magnet: and bc://bt/)
 type MagnetDLConfig struct {
-	Url string `json:"urls"`
-	downloadBase
+	Urls []string `json:"urls"`
+	downloadBaseConfig
+}
+
+func (cfg MagnetDLConfig) toMap() map[string]string {
+	data := cfg.downloadBaseConfig.toMap()
+	data["urls"] = strings.Join(cfg.Urls, "\n")
+	return data
+}
+
+// DownloadFromLink
+// Add one or more torrents by URLs and/or torrent files.
+//
+// :raises UnsupportedMediaType415Error: if file is not a valid torrent file
+// :raises TorrentFileNotFoundError: if a torrent file doesn't exist
+// :raises TorrentFilePermissionError: if read permission is denied to torrent file
+//
+// :return: “Ok.“ for success and “Fails.“ for failure
+func (t *TorrentsApi) DownloadFromLink(cfg MagnetDLConfig) error {
+	resp, err := t.client.postMultipartData(APINameTorrents, "add", cfg.toMap())
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return err
+	}
+	//fmt.Println(string(body))
+	//fmt.Println(resp.StatusCode)
+	if resp.StatusCode == http.StatusOK {
+		if string(body) == "Ok." {
+			return nil
+		} else {
+			return errors.New("DownloadFromLink Fails.")
+		}
+	}
+
+	return handleResponsesErr(resp.StatusCode)
 }
 
 // TorrentDLConfig
@@ -260,9 +416,448 @@ type MagnetDLConfig struct {
 //     name is not provided, then the name of the file will be used. And in the case of
 //     bytes (or if filename cannot be determined), the value 'torrent__n' will be used
 type TorrentDLConfig struct {
-	downloadBase
+	File string `json:"file"`
+	downloadBaseConfig
 }
 
-func (t *TorrentsApi) DownloadFromLink(cfg MagnetDLConfig) ([]*Torrent, error) {
-	return nil, nil
+func (t *TorrentsApi) DownloadFromFile(cfg TorrentDLConfig) error {
+	resp, err := t.client.postMultipartFile(APINameTorrents, "add", cfg.File, cfg.toMap())
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return err
+	}
+	//fmt.Println(string(body))
+	//fmt.Println(resp.StatusCode)
+	if resp.StatusCode == http.StatusOK {
+		if string(body) == "Ok." {
+			return nil
+		} else {
+			return errors.New("DownloadFromLink Fails.")
+		}
+	}
+
+	return handleResponsesErr(resp.StatusCode)
+}
+
+func (t *TorrentsApi) getForTorrent(path string, data map[string]string) (int, []byte, error) {
+	resp, err := t.client.Request.get(APINameTorrents, path, data)
+	if err != nil {
+		return 0, nil, err
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return 0, nil, err
+	}
+	//fmt.Println(string(body))
+	//fmt.Println(resp.StatusCode)
+	if err := handleResponsesErr(resp.StatusCode); err != nil {
+		return 0, nil, err
+	}
+	return resp.StatusCode, body, nil
+}
+
+func (t *TorrentsApi) postForTorrent(path string, data map[string]string) (int, []byte, error) {
+	resp, err := t.client.Request.post(APINameTorrents, path, data)
+	if err != nil {
+		return 0, nil, err
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return 0, nil, err
+	}
+	//fmt.Println(string(body))
+	//fmt.Println(resp.StatusCode)
+	return resp.StatusCode, body, nil
+}
+
+type torrentsAction = string
+
+const (
+	actionPause            torrentsAction = "pause"
+	actionResume           torrentsAction = "resume"
+	actionDelete           torrentsAction = "delete"
+	actionRecheck          torrentsAction = "recheck"
+	actionReAnnounce       torrentsAction = "reannounce"
+	actionIncreasePriority torrentsAction = "increasePrio"
+	actionDecreasePriority torrentsAction = "decreasePrio"
+	actionTopPriority      torrentsAction = "topPrio"
+	actionBottomPriority   torrentsAction = "bottomPrio"
+	actionGetAllCategories torrentsAction = "categories"
+	actionSetCategory      torrentsAction = "setCategory"
+	actionCreateCategory   torrentsAction = "createCategory"
+	actionEditCategory     torrentsAction = "editCategory"
+	actionRemoveCategories torrentsAction = "removeCategories"
+	actionGetAllTags       torrentsAction = "tags"
+	actionAddTags          torrentsAction = "addTags"
+	actionRemoveTags       torrentsAction = "removeTags"
+	actionCreateTags       torrentsAction = "createTags"
+	actionDeleteTags       torrentsAction = "deleteTags"
+)
+const (
+	actionToggleSequentialDownload     torrentsAction = "toggleSequentialDownload"
+	actionToggleFirstLastPiecePriority torrentsAction = "toggleFirstLastPiecePrio"
+)
+
+var actionForAll = []string{"all"}
+
+type action struct {
+	param  map[string]string
+	method torrentsAction
+}
+
+func newAction(method torrentsAction) *action {
+	return &action{param: map[string]string{}, method: method}
+}
+
+func (a *action) withHashes(ts []*Torrent) *action {
+	var hashes []string
+	for _, torrent := range ts {
+		hashes = append(hashes, torrent.Hash)
+	}
+	a.param["hashes"] = strings.Join(hashes, "|")
+	return a
+}
+
+func (a *action) withTags(tags []string) *action {
+	return a.setParam("tags", strings.Join(tags, ","))
+}
+
+func (a *action) setParam(key, val string) *action {
+	a.param[key] = val
+	return a
+}
+
+func (a *action) setBoolParam(key string, val bool) *action {
+	a.param[key] = "false"
+	if val {
+		a.setParam(key, "true")
+	}
+	return a
+}
+
+func (a *action) setIntParam(key string, val int) *action {
+	a.param[key] = strconv.Itoa(val)
+	return a
+}
+
+func (t *TorrentsApi) actionByHashes(hashes []string, act *action) error {
+	return t.actionByParams(act.setParam("hashes", strings.Join(hashes, "|")))
+}
+
+func (t *TorrentsApi) actionByParams(act *action) error {
+	statusCode, _, err := t.client.postForTorrent(act.method, act.param)
+	if err != nil {
+		return err
+	}
+
+	if statusCode == http.StatusOK {
+		return nil
+	}
+	return handleResponsesErr(statusCode)
+}
+
+// Pause pause one or more torrents in qBittorrent.
+func (t *TorrentsApi) Pause(ts ...*Torrent) error {
+	if len(ts) == 0 {
+		return nil
+	}
+
+	return t.actionByParams(newAction(actionPause).withHashes(ts))
+}
+
+// PauseByHashes pause torrents in qBittorrent by hashes.
+func (t *TorrentsApi) PauseByHashes(hashes []string) error {
+	return t.actionByHashes(hashes, newAction(actionPause))
+}
+
+// PauseAll pause all torrents in qBittorrent.
+func (t *TorrentsApi) PauseAll() error {
+	return t.PauseByHashes(actionForAll)
+}
+
+// Resume resume one or more torrents in qBittorrent.
+func (t *TorrentsApi) Resume(ts ...*Torrent) error {
+	if len(ts) == 0 {
+		return nil
+	}
+
+	return t.actionByParams(newAction(actionResume).withHashes(ts))
+}
+
+// ResumeByHashes resume torrents in qBittorrent by hashes.
+func (t *TorrentsApi) ResumeByHashes(hashes []string) error {
+	return t.actionByHashes(hashes, newAction(actionResume))
+}
+
+// ResumeAll resume all torrents in qBittorrent.
+func (t *TorrentsApi) ResumeAll() error {
+	return t.ResumeByHashes(actionForAll)
+}
+
+// Delete
+// Remove a torrent from qBittorrent and optionally delete its files.
+// param delete_files: True to delete the torrent's files
+// param torrent_hashes: single torrent hash or list of torrent hashes. Or “all“ for all torrents.
+// return: None
+func (t *TorrentsApi) Delete(deleteFiles bool, ts ...*Torrent) error {
+	if len(ts) == 0 {
+		return nil
+	}
+
+	return t.actionByParams(newAction(actionDelete).withHashes(ts).setBoolParam("deleteFiles", deleteFiles))
+}
+
+func (t *TorrentsApi) DeleteByHashes(deleteFiles bool, hashes []string) error {
+	return t.actionByHashes(hashes, newAction(actionDelete).setBoolParam("deleteFiles", deleteFiles))
+}
+
+func (t *TorrentsApi) DeleteAll(deleteFiles bool) error {
+	return t.DeleteByHashes(deleteFiles, actionForAll)
+}
+
+// Recheck a torrent in qBittorrent.
+func (t *TorrentsApi) Recheck(ts ...*Torrent) error {
+	if len(ts) == 0 {
+		return nil
+	}
+
+	return t.actionByParams(newAction(actionRecheck).withHashes(ts))
+}
+
+func (t *TorrentsApi) RecheckByHashes(hashes []string) error {
+	return t.actionByHashes(hashes, newAction(actionRecheck))
+}
+
+func (t *TorrentsApi) RecheckAll() error {
+	return t.RecheckByHashes(actionForAll)
+}
+
+// ReAnnounce a torrent in qBittorrent.
+func (t *TorrentsApi) ReAnnounce(ts ...*Torrent) error {
+	if len(ts) == 0 {
+		return nil
+	}
+
+	return t.actionByParams(newAction(actionReAnnounce).withHashes(ts))
+}
+
+func (t *TorrentsApi) ReAnnounceByHashes(hashes []string) error {
+	return t.actionByHashes(hashes, newAction(actionReAnnounce))
+}
+
+func (t *TorrentsApi) ReAnnounceAll() error {
+	return t.ReAnnounceByHashes(actionForAll)
+}
+
+// IncreasePriority
+// Increase the priority of a torrent. Torrent Queuing must be enabled.
+// 向上移动队列
+func (t *TorrentsApi) IncreasePriority(ts ...*Torrent) error {
+	if len(ts) == 0 {
+		return nil
+	}
+
+	return t.actionByParams(newAction(actionIncreasePriority).withHashes(ts))
+}
+
+func (t *TorrentsApi) IncreasePriorityByHashes(hashes []string) error {
+	return t.actionByHashes(hashes, newAction(actionIncreasePriority))
+}
+
+func (t *TorrentsApi) IncreasePriorityAll() error {
+	return t.IncreasePriorityByHashes(actionForAll)
+}
+
+// DecreasePriority
+// Decrease the priority of a torrent. Torrent Queuing must be enabled.
+// 向下移动队列
+func (t *TorrentsApi) DecreasePriority(ts ...*Torrent) error {
+	if len(ts) == 0 {
+		return nil
+	}
+
+	return t.actionByParams(newAction(actionDecreasePriority).withHashes(ts))
+}
+
+func (t *TorrentsApi) DecreasePriorityByHashes(hashes []string) error {
+	return t.actionByHashes(hashes, newAction(actionDecreasePriority))
+}
+
+func (t *TorrentsApi) DecreasePriorityAll() error {
+	return t.DecreasePriorityByHashes(actionForAll)
+}
+
+// TopPriority
+// Set torrent as highest priority. Torrent Queuing must be enabled.
+// 移动到队列顶部
+func (t *TorrentsApi) TopPriority(ts ...*Torrent) error {
+	if len(ts) == 0 {
+		return nil
+	}
+
+	return t.actionByParams(newAction(actionTopPriority).withHashes(ts))
+}
+
+func (t *TorrentsApi) TopPriorityByHashes(hashes []string) error {
+	return t.actionByHashes(hashes, newAction(actionTopPriority))
+}
+
+func (t *TorrentsApi) TopPriorityAll() error {
+	return t.TopPriorityByHashes(actionForAll)
+}
+
+// BottomPriority
+// Set torrent as highest priority. Torrent Queuing must be enabled.
+// 移动到队列底部
+func (t *TorrentsApi) BottomPriority(ts ...*Torrent) error {
+	if len(ts) == 0 {
+		return nil
+	}
+
+	return t.actionByParams(newAction(actionBottomPriority).withHashes(ts))
+}
+
+func (t *TorrentsApi) BottomPriorityByHashes(hashes []string) error {
+	return t.actionByHashes(hashes, newAction(actionBottomPriority))
+}
+
+func (t *TorrentsApi) BottomPriorityAll() error {
+	return t.BottomPriorityByHashes(actionForAll)
+}
+
+// SetCategory  Set a category for one or more torrents.
+func (t *TorrentsApi) SetCategory(category string, ts ...*Torrent) error {
+	if len(ts) == 0 {
+		return nil
+	}
+
+	return t.actionByParams(newAction(actionSetCategory).withHashes(ts).setParam("category", category))
+}
+
+func (t *TorrentsApi) SetCategoryByHashes(category string, hashes []string) error {
+	return t.actionByHashes(hashes, newAction(actionSetCategory).setParam("category", category))
+}
+
+func (t *TorrentsApi) SetCategoryForAll(category string) error {
+	return t.SetCategoryByHashes(category, actionForAll)
+}
+
+// CreateCategory Create a new torrent category.
+// param name: name for new category
+// param save_path: location to save torrents for this category (added in Web API 2.1.0)
+// param download_path: download location for torrents with this category
+// param enable_download_path: True or False to enable or disable download path
+func (t *TorrentsApi) CreateCategory(category Category) error {
+	act := newAction(actionCreateCategory).
+		setParam("category", category.Name).
+		setParam("savePath", category.SavePath).
+		setParam("downloadPath", category.DownloadPath).
+		setBoolParam("downloadPathEnabled", category.DownloadPath != "")
+	return t.actionByParams(act)
+}
+
+// EditCategory Edit an existing category.
+func (t *TorrentsApi) EditCategory(category Category) error {
+	act := newAction(actionEditCategory).
+		setParam("category", category.Name).
+		setParam("savePath", category.SavePath).
+		setParam("downloadPath", category.DownloadPath).
+		setBoolParam("downloadPathEnabled", category.DownloadPath != "")
+	return t.actionByParams(act)
+}
+
+// RemoveCategories Delete one or more categories.
+func (t *TorrentsApi) RemoveCategories(categories []string) error {
+	return t.actionByParams(newAction(actionRemoveCategories).setParam("categories", strings.Join(categories, "\n")))
+}
+
+// CreateTags Create one or more tags.
+func (t *TorrentsApi) CreateTags(tags ...string) error {
+	if len(tags) == 0 {
+		return nil
+	}
+	return t.actionByParams(newAction(actionCreateTags).withTags(tags))
+}
+
+// DeleteTags Delete one or more tags.
+func (t *TorrentsApi) DeleteTags(tags ...string) error {
+	if len(tags) == 0 {
+		return nil
+	}
+	return t.actionByParams(newAction(actionDeleteTags).withTags(tags))
+}
+
+// AddTags Add one or more tags to one or more torrents.
+// Note: Tags that do not exist will be created on-the-fly.
+//
+// param tags: tag name or list of tags
+// param torrent_hashes: single torrent hash or list of torrent hashes. Or “all“ for all torrents.
+func (t *TorrentsApi) AddTags(tags []string, ts ...*Torrent) error {
+	return t.actionByParams(newAction(actionAddTags).withHashes(ts).withTags(tags))
+}
+
+func (t *TorrentsApi) AddTagsByHashes(tags, hashes []string) error {
+	return t.actionByHashes(hashes, newAction(actionAddTags).withTags(tags))
+}
+
+func (t *TorrentsApi) AddTagsForAll(tags []string) error {
+	return t.AddTagsByHashes(tags, actionForAll)
+}
+
+// RemoveTags Remove one or more tags to one or more torrents.
+func (t *TorrentsApi) RemoveTags(tags []string) error {
+	return t.actionByParams(newAction(actionRemoveTags).withTags(tags))
+}
+
+func (t *TorrentsApi) RemoveTagsByHashes(tags, hashes []string) error {
+	return t.actionByHashes(hashes, newAction(actionRemoveTags).withTags(tags))
+}
+
+func (t *TorrentsApi) RemoveTagsForAll(tags []string) error {
+	return t.RemoveTagsByHashes(tags, actionForAll)
+}
+
+// ToggleFirstLastPiecePriority
+// Increase the priority of a torrent. Torrent Queuing must be enabled.
+// 选中/取消 先下载首尾文件块
+func (t *TorrentsApi) ToggleFirstLastPiecePriority(ts ...*Torrent) error {
+	if len(ts) == 0 {
+		return nil
+	}
+
+	return t.actionByParams(newAction(actionToggleFirstLastPiecePriority).withHashes(ts))
+}
+
+func (t *TorrentsApi) ToggleFirstLastPiecePriorityByHashes(hashes []string) error {
+	return t.actionByHashes(hashes, newAction(actionToggleFirstLastPiecePriority))
+}
+
+func (t *TorrentsApi) ToggleFirstLastPiecePriorityForAll() error {
+	return t.ToggleFirstLastPiecePriorityByHashes(actionForAll)
+}
+
+// ToggleSequentialDownload
+// Increase the priority of a torrent. Torrent Queuing must be enabled.
+// 选中/取消 按顺序下载
+func (t *TorrentsApi) ToggleSequentialDownload(ts ...*Torrent) error {
+	if len(ts) == 0 {
+		return nil
+	}
+
+	return t.actionByParams(newAction(actionToggleSequentialDownload).withHashes(ts))
+}
+
+func (t *TorrentsApi) ToggleSequentialDownloadByHashes(hashes []string) error {
+	return t.actionByHashes(hashes, newAction(actionToggleSequentialDownload))
+}
+
+func (t *TorrentsApi) ToggleSequentialDownloadAll() error {
+	return t.ToggleSequentialDownloadByHashes(actionForAll)
 }
