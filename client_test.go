@@ -37,7 +37,7 @@ func TestDownloadFromLink(t *testing.T) {
 	//c.Login()
 	if err := c.DownloadFromLink(MagnetDLConfig{
 		Urls: []string{"magnet:?xt=urn:btih:076e0288a6147459d261ee1a55c18f1f91a241c2"},
-		downloadBaseConfig: downloadBaseConfig{
+		DownloadBaseConfig: DownloadBaseConfig{
 			SavePath: "/bt",
 			Tags:     []string{"tag1", "tag2"},
 			Category: "Category",
