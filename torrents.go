@@ -2,11 +2,12 @@ package qbittorrent_api
 
 import (
 	"encoding/json"
-	"github.com/pkg/errors"
 	"io"
 	"net/http"
 	"strconv"
 	"strings"
+
+	"github.com/pkg/errors"
 )
 
 type torrentsApi struct {
@@ -279,7 +280,7 @@ func (t *torrentsApi) GetAllTags() ([]string, error) {
 	return tags, nil
 }
 
-// downloadBaseConfig
+// DownloadBaseConfig
 // :param save_path: location to save the torrent data
 // :param cookie: cookie to retrieve torrents by URL
 // :param category: category to assign to torrent(s)
@@ -298,7 +299,7 @@ func (t *torrentsApi) GetAllTags() ([]string, error) {
 // :param seeding_time_limit: number of minutes to seed torrent (added in Web API 2.8.1)
 // :param download_path: location to download torrent content before moving to save_path (added in Web API 2.8.4)
 // :param use_download_path: whether the download_path should be used...defaults to True if download_path is specified (added in Web API 2.8.4)
-type downloadBaseConfig struct {
+type DownloadBaseConfig struct {
 	SavePath           string        `json:"savepath"`           // 保存文件到：
 	Category           string        `json:"category"`           // 分类：
 	Tags               []string      `json:"tags"`               // 标签
@@ -318,7 +319,7 @@ type downloadBaseConfig struct {
 	//UseDownloadPath    bool          `json:"useDownloadPath"`
 }
 
-func (cfg downloadBaseConfig) toMap() map[string]string {
+func (cfg DownloadBaseConfig) toMap() map[string]string {
 	data := map[string]string{
 		"autoTMM":  "false",
 		"savepath": cfg.SavePath,
@@ -372,11 +373,11 @@ const (
 // :param urls: single instance or an iterable of URLs (http://, https://, magnet: and bc://bt/)
 type MagnetDLConfig struct {
 	Urls []string `json:"urls"`
-	downloadBaseConfig
+	DownloadBaseConfig
 }
 
 func (cfg MagnetDLConfig) toMap() map[string]string {
-	data := cfg.downloadBaseConfig.toMap()
+	data := cfg.DownloadBaseConfig.toMap()
 	data["urls"] = strings.Join(cfg.Urls, "\n")
 	return data
 }
@@ -426,7 +427,7 @@ func (t *torrentsApi) DownloadFromLink(cfg MagnetDLConfig) error {
 //     bytes (or if filename cannot be determined), the value 'torrent__n' will be used
 type TorrentDLConfig struct {
 	File string `json:"file"`
-	downloadBaseConfig
+	DownloadBaseConfig
 }
 
 func (t *torrentsApi) DownloadFromFile(cfg TorrentDLConfig) error {
