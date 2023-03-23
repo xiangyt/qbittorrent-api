@@ -321,8 +321,8 @@ type DownloadBaseConfig struct {
 
 func (cfg DownloadBaseConfig) toMap() map[string]string {
 	data := map[string]string{
-		"autoTMM":  "false",
-		"savepath": cfg.SavePath,
+		"autoTMM": "false",
+		//"savepath": cfg.SavePath,
 		"rename":   cfg.Rename,
 		"category": cfg.Category,
 		"tags":     strings.Join(cfg.Tags, ","),
@@ -335,6 +335,8 @@ func (cfg DownloadBaseConfig) toMap() map[string]string {
 	}
 	if cfg.AutoTMM {
 		data["autoTMM"] = "true"
+	} else {
+		data["savepath"] = cfg.SavePath
 	}
 	if cfg.Paused {
 		data["paused"] = "true"
