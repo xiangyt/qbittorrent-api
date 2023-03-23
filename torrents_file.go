@@ -23,7 +23,7 @@ const (
 type TorrentFile struct {
 	Index        int          `json:"index"`        // File index
 	Name         string       `json:"name"`         // File name (including relative path)
-	Size         int          `json:"size"`         // File size (bytes)
+	Size         int64        `json:"size"`         // File size (bytes)
 	Progress     float64      `json:"progress"`     // File progress (percentage/100)
 	Priority     FilePriority `json:"priority"`     // File priority. See possible values here below
 	IsSeed       bool         `json:"is_seed"`      // True if file is seeding/complete
@@ -43,6 +43,16 @@ func (tfs TorrentFiles) Less(i, j int) bool {
 
 func (tfs TorrentFiles) Swap(i, j int) {
 	tfs[i], tfs[j] = tfs[j], tfs[i]
+}
+
+func (tfs TorrentFiles) Filter(fn func(tf *TorrentFile) bool) TorrentFiles {
+	var Filtered TorrentFiles
+	for _, tf := range tfs {
+		if fn(tf) {
+			Filtered = append(Filtered, tf)
+		}
+	}
+	return Filtered
 }
 
 // GetAllTorrentFiles
