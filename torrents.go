@@ -178,10 +178,10 @@ const (
 
 func (f *Filter) toMap() map[string]string {
 	var data = map[string]string{
-		"filter":   f.StatusFilter,
-		"category": f.Category,
-		"sort":     f.Sort,
-		"reverse":  "false",
+		"filter": f.StatusFilter,
+		//"category": f.Category,
+		"sort":    f.Sort,
+		"reverse": "false",
 		//"limit": limit,
 		//"offset": offset,
 		"hashes": strings.Join(f.Hashes, "|"),
@@ -199,6 +199,9 @@ func (f *Filter) toMap() map[string]string {
 	}
 	if f.Offset != 0 {
 		data["offset"] = strconv.Itoa(f.Offset)
+	}
+	if f.Category != "" {
+		data["category"] = f.Category
 	}
 	if f.Tag != "" {
 		data["tag"] = f.Tag
